@@ -50,7 +50,8 @@ const apiLimiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: process.env.LOGIN_LIMIT_MAX
+  max: process.env.LOGIN_LIMIT_MAX,
+  message: "Muitas tentativas de login. Tente novamente mais tarde."
 });
 
 // Middlewares

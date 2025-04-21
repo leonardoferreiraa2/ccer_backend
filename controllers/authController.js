@@ -15,7 +15,8 @@ const login = async (req, res) => {
       fields: {
         email: !email ? 'Email é obrigatório' : undefined,
         senha: !senha ? 'Senha é obrigatória' : undefined
-      }
+      },
+      shouldRedirect: false
     });
   }
 
@@ -25,7 +26,8 @@ const login = async (req, res) => {
       return res.status(401).json({
         success: false,
         code: 'CREDENCIAIS_INVALIDAS',
-        message: 'Email ou senha incorretos'
+        message: 'Email ou senha incorretos',
+        shouldRedirect: false
       });
     }
 
@@ -34,7 +36,8 @@ const login = async (req, res) => {
       return res.status(401).json({
         success: false,
         code: 'CREDENCIAIS_INVALIDAS',
-        message: 'Email ou senha incorretos'
+        message: 'Email ou senha incorretos',
+        shouldRedirect: false
       });
     }
 
@@ -49,7 +52,7 @@ const login = async (req, res) => {
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.COOKIE_SECURE === 'true',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 dias
+      maxAge: 7 * 24 * 60 * 60 * 1000,
       sameSite: 'strict'
     });
 
@@ -63,7 +66,8 @@ const login = async (req, res) => {
         email: usuario.email,
         perfil: usuario.perfil,
         status: usuario.status
-      }
+      },
+      shouldRedirect: true
     });
 
   } catch (error) {
@@ -71,7 +75,8 @@ const login = async (req, res) => {
     return res.status(500).json({
       success: false,
       code: 'ERRO_INTERNO',
-      message: 'Não foi possível realizar o login'
+      message: 'Não foi possível realizar o login',
+      shouldRedirect: false
     });
   }
 };
@@ -83,7 +88,8 @@ const refresh = async (req, res) => {
     return res.status(401).json({
       success: false,
       code: 'TOKEN_INVALIDO',
-      message: 'Refresh token não fornecido'
+      message: 'Refresh token não fornecido',
+      shouldRedirect: true
     });
   }
 
@@ -95,7 +101,8 @@ const refresh = async (req, res) => {
       return res.status(401).json({
         success: false,
         code: 'USUARIO_NAO_ENCONTRADO',
-        message: 'Usuário não encontrado'
+        message: 'Usuário não encontrado',
+        shouldRedirect: true
       });
     }
 
@@ -108,7 +115,8 @@ const refresh = async (req, res) => {
     return res.status(200).json({
       success: true,
       token: newToken,
-      expiresIn: process.env.JWT_EXPIRES_IN
+      expiresIn: process.env.JWT_EXPIRES_IN,
+      shouldRedirect: false
     });
 
   } catch (error) {
@@ -116,7 +124,8 @@ const refresh = async (req, res) => {
     return res.status(401).json({
       success: false,
       code: 'TOKEN_INVALIDO',
-      message: 'Refresh token inválido ou expirado'
+      message: 'Refresh token inválido ou expirado',
+      shouldRedirect: true
     });
   }
 };
@@ -130,18 +139,27 @@ const logout = async (req, res) => {
       return res.status(400).json({
         success: false,
         code: 'TOKEN_INVALIDO',
-        message: 'Nenhum token fornecido'
+        message: 'Nenhum token fornecido',
+        shouldRedirect: true
       });
     }
 
     if (token) {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      await cache.invalidateToken(decoded.id);
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        await cache.invalidateToken(decoded.id);
+      } catch (error) {
+        console.log('Token JWT inválido ou expirado:', error.message);
+      }
     }
 
     if (refreshToken) {
-      const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
-      await cache.invalidateToken(decoded.id);
+      try {
+        const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+        await cache.invalidateToken(decoded.id);
+      } catch (error) {
+        console.log('Refresh token inválido ou expirado:', error.message);
+      }
     }
 
     res.clearCookie('refreshToken', {
@@ -151,7 +169,8 @@ const logout = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'Logout realizado com sucesso'
+      message: 'Logout realizado com sucesso',
+      shouldRedirect: true
     });
 
   } catch (error) {
@@ -159,7 +178,8 @@ const logout = async (req, res) => {
     return res.status(500).json({
       success: false,
       code: 'ERRO_LOGOUT',
-      message: 'Ocorreu um erro durante o logout'
+      message: 'Ocorreu um erro durante o logout',
+      shouldRedirect: true
     });
   }
 };
