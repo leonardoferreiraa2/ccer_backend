@@ -1,15 +1,18 @@
 const express = require('express');
 const router = express.Router();
 const usuariosController = require('../controllers/usuariosController');
-const { authMiddleware } = require('../middlewares/auth');
+const { authMiddleware, adminOnly } = require('../middlewares/auth');
 
-// Todas as rotas exigem autenticação (mas não específica de admin)
+// Todas as rotas requerem autenticação
 router.use(authMiddleware);
 
-router.get('/', usuariosController.listUsuarios);
+// Rotas acessíveis apenas para admin
+router.post('/', adminOnly, usuariosController.createUsuario);
+router.get('/', adminOnly, usuariosController.listUsuarios);
+
+// Rotas para usuários comuns (próprio usuário)
 router.get('/:id', usuariosController.getUsuario);
-router.post('/', usuariosController.createUsuario);
 router.put('/:id', usuariosController.updateUsuario);
-router.delete('/:id', usuariosController.deleteUsuario);
+router.delete('/:id', adminOnly, usuariosController.deleteUsuario);
 
 module.exports = router;

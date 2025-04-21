@@ -9,6 +9,7 @@ __pycache__/
 *.so
 *.egg-info/
 
+dev.sqlite3
 node_modules
 package-lock.json
 # Ambiente

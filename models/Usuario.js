@@ -1,94 +1,92 @@
 const db = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
-const bcrypt = require('bcryptjs');
 const { hashPassword } = require('../utils/auth');
 
-const Usuario = {
-  async registrarLogin(id) {
-    await db('usuarios')
-      .where({ id })
-      .update({ 
-        last_login: new Date(),
-        login_count: db.raw('login_count + 1') 
-      });
-  },
-
-  async findByEmail(email, id = null) {
-    if (id) {
-      return db('usuarios').whereNot({ id }).where({ email }).first();
+class Usuario {
+  static async create({ nome, email, senha, perfil = 'Usuario' }) {
+    if (!nome || !email || !senha) {
+      throw new Error('Nome, email e senha são obrigatórios');
     }
-    return db('usuarios').where({ email }).first();
-  },
 
-  async create(usuarioData) {
-    usuarioData.id = uuidv4();
-    usuarioData.senha = await hashPassword(usuarioData.senha);
-    usuarioData.status = 'Ativo';
-    
-    await db('usuarios').insert(usuarioData);
-    return this.findById(usuarioData.id);
-  },
+    const exists = await this.findByEmail(email);
+    if (exists) {
+      throw new Error('Email já cadastrado');
+    }
 
-  async findById(id) {
-    return db('usuarios').where({ id }).first();
-  },
+    const id = uuidv4();
+    const hashedPassword = await hashPassword(senha);
 
-  async findByCredentials(email, senha) {
-    const usuario = await this.findByEmail(email);
-    if (!usuario) return null;
-    
-    const isMatch = await bcrypt.compare(senha, usuario.senha);
-    if (!isMatch) return null;
-    
-    return usuario;
-  },
+    await db('usuarios').insert({
+      id,
+      nome,
+      email,
+      senha: hashedPassword,
+      perfil,
+      status: 'Ativo',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now()
+    });
 
-  async count() {
-    const result = await db('usuarios').count('* as total');
-    return parseInt(result[0].total);
-  },
+    return this.findById(id);
+  }
 
-  async list({ page = 1, perPage = 10, search = '' }) {
-    const query = db('usuarios').orderBy('nome', 'asc');
+  static async findByEmail(email, excludeId = null) {
+    const query = db('usuarios').where('email', email);
+    if (excludeId) query.whereNot('id', excludeId);
+    return query.first();
+  }
+
+  static async findById(id) {
+    return db('usuarios')
+      .where('id', id)
+      .select('id', 'nome', 'email', 'perfil', 'status', 'created_at', 'updated_at')
+      .first();
+  }
+
+  static async update(id, updates) {
+    if (updates.senha) {
+      updates.senha = await hashPassword(updates.senha);
+    }
+
+    await db('usuarios')
+      .where('id', id)
+      .update({
+        ...updates,
+        updated_at: db.fn.now()
+      });
+
+    return this.findById(id);
+  }
+
+  static async delete(id) {
+    return db('usuarios').where('id', id).del();
+  }
+
+  static async list({ page = 1, perPage = 10, search = '' }) {
+    const query = db('usuarios')
+      .select('id', 'nome', 'email', 'perfil', 'status')
+      .orderBy('nome');
 
     if (search) {
       query.where(function() {
         this.where('nome', 'like', `%${search}%`)
-          .orWhere('email', 'like', `%${search}%`)
-          .orWhere('perfil', 'like', `%${search}%`)
-          .orWhere('status', 'like', `%${search}%`);
+          .orWhere('email', 'like', `%${search}%`);
       });
     }
 
     const [total] = await query.clone().count('* as total');
-    const usuarios = await query
-      .offset((page - 1) * perPage)
-      .limit(perPage);
+    const data = await query.offset((page - 1) * perPage).limit(perPage);
 
     return {
-      data: usuarios,
+      data,
       pagination: {
-        total: total.total,
-        page,
-        perPage,
+        total: parseInt(total.total),
+        page: parseInt(page),
+        perPage: parseInt(perPage),
         totalPages: Math.ceil(total.total / perPage)
       }
     };
-  },
-
-  async update(id, updates) {
-    updates.updated_at = new Date();
-    if (updates.senha) {
-      updates.senha = await hashPassword(updates.senha);
-    }
-    await db('usuarios').where({ id }).update(updates);
-    return this.findById(id);
-  },
-
-  async delete(id) {
-    return db('usuarios').where({ id }).del();
   }
-};
+}
 
 module.exports = Usuario;
-

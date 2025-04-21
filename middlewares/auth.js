@@ -1,56 +1,75 @@
-const jwt = require('jsonwebtoken');
-const cache = require('../config/cache');
+// C:\Temp\ccer\backend\middlewares\auth.js
+const { verifyToken } = require('../utils/auth');
 
 const authMiddleware = async (req, res, next) => {
-  const token = req.header('x-auth-token');
-  
+  const authHeader = req.headers['authorization'] || '';
+  const token = authHeader.split(' ')[1] || req.cookies?.token || req.query?.token;
+
   if (!token) {
-    console.log('❌ Token não fornecido no header');
-    return res.status(401).json({ message: 'Token não fornecido' });
+    return res.status(401).json({
+      success: false,
+      code: 'MISSING_TOKEN',
+      message: 'Token de autenticação não fornecido'
+    });
   }
 
   try {
-    // 1. Verificação básica do JWT
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log(`🔍 Token decodificado para usuário: ${decoded.id}`);
-
-    // 2. Verificação no cache com logs detalhados
-    const cacheKey = `token:${decoded.id}`;
-    console.log(`🔎 Buscando token no cache: ${cacheKey}`);
-    
-    const cachedToken = await cache.get(cacheKey);
-    console.log(`📦 Token no cache: ${cachedToken ? 'Encontrado' : 'Não encontrado'}`);
-
-    // 3. Validação completa
-    if (!cachedToken) {
-      console.log(`❌ Token não encontrado no cache para usuário: ${decoded.id}`);
-      return res.status(401).json({ message: 'Token inválido (não encontrado no cache)' });
+    const decoded = await verifyToken(token);
+    if (!decoded) {
+      return res.status(401).json({
+        success: false,
+        code: 'INVALID_TOKEN',
+        message: 'Token inválido ou expirado'
+      });
     }
 
-    if (cachedToken !== token) {
-      console.log(`❌ Token não coincide:
-        Cache: ${cachedToken.substring(0, 10)}...
-        Recebido: ${token.substring(0, 10)}...`);
-      return res.status(401).json({ message: 'Token inválido (versão incorreta)' });
-    }
+    req.user = {
+      id: decoded.id,
+      email: decoded.email,
+      perfil: decoded.perfil
+    };
 
-    console.log(`✅ Token válido para usuário: ${decoded.id}`);
-    req.user = decoded;
     next();
-
-  } catch (err) {
-    console.error('💥 Erro na verificação do token:', {
-      error: err.message,
-      token: token.substring(0, 15) + '...'
-    });
+  } catch (error) {
+    console.error('Auth middleware error:', error);
     
-    res.status(401).json({ 
-      message: 'Token inválido',
-      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    let status = 401;
+    let code = 'AUTH_ERROR';
+    let message = 'Erro de autenticação';
+
+    if (error.name === 'TokenExpiredError') {
+      code = 'TOKEN_EXPIRED';
+      message = 'Sessão expirada. Por favor, faça login novamente.';
+    } else if (error.name === 'JsonWebTokenError') {
+      code = 'INVALID_TOKEN';
+      message = 'Token inválido';
+    } else {
+      status = 500;
+      code = 'SERVER_ERROR';
+      message = 'Erro durante a autenticação';
+    }
+
+    res.status(status).json({
+      success: false,
+      code,
+      message,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
 
+const adminOnly = (req, res, next) => {
+  if (req.user?.perfil !== 'Administrador') {
+    return res.status(403).json({
+      success: false,
+      code: 'FORBIDDEN',
+      message: 'Acesso restrito a administradores'
+    });
+  }
+  next();
+};
+
 module.exports = {
-  authMiddleware
+  authMiddleware,
+  adminOnly
 };

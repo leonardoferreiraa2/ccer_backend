@@ -1,82 +1,53 @@
-const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const Usuario = require('../models/Usuario');
-const { generateToken } = require('../utils/auth');
+const { generateToken, verifyToken } = require('../utils/auth');
 const cache = require('../config/cache');
 
-const login = async (req, res, next) => {
-  try {
-    const { email, senha } = req.body;
+const login = async (req, res) => {
+  const { email, senha } = req.body;
 
-    if (!email?.trim() || !senha?.trim()) {
-      return res.status(400).json({ 
-        message: 'Email e senha são obrigatórios',
-        code: 'CREDENCIAIS_VAZIAS'
-      });
-    }
-
-    // Verificação de tentativas com cache
-    const attemptsKey = `login_attempts:${email}`;
-    const attempts = (await cache.get(attemptsKey)) || 0;
-    
-    if (attempts >= Number(process.env.LOGIN_ATTEMPTS_LIMIT || 5)) {
-      return res.status(429).json({
-        message: 'Muitas tentativas. Tente novamente em 5 minutos.',
-        code: 'TOO_MANY_ATTEMPTS',
-        retryAfter: 300
-      });
-    }
-
-    // Busca usuário com cache
-    const cacheKey = `user:${email}`;
-    let usuario = await cache.get(cacheKey);
-    
-    if (!usuario) {
-      usuario = await Usuario.findByEmail(email);
-      if (usuario) {
-        await cache.set(cacheKey, usuario, 3600); // Cache por 1 hora
+  if (!email || !senha) {
+    return res.status(400).json({
+      success: false,
+      code: 'CREDENCIAIS_INVALIDAS',
+      message: 'Por favor, forneça email e senha',
+      fields: {
+        email: !email ? 'Email é obrigatório' : undefined,
+        senha: !senha ? 'Senha é obrigatória' : undefined
       }
-    }
+    });
+  }
 
+  try {
+    const usuario = await Usuario.findByEmail(email);
     if (!usuario) {
-      await cache.set(attemptsKey, attempts + 1, 300); // 5 minutos de bloqueio
-      return res.status(401).json({ 
-        message: 'Credenciais inválidas',
-        code: 'CREDENCIAIS_INVALIDAS'
+      return res.status(401).json({
+        success: false,
+        code: 'CREDENCIAIS_INVALIDAS',
+        message: 'Email ou senha incorretos'
       });
     }
 
-    if (usuario.status !== 'Ativo') {
-      return res.status(403).json({
-        message: 'Conta inativa. Contate o administrador.',
-        code: 'CONTA_INATIVA'
+    const senhaValida = await bcrypt.compare(senha, usuario.senha);
+    if (!senhaValida) {
+      return res.status(401).json({
+        success: false,
+        code: 'CREDENCIAIS_INVALIDAS',
+        message: 'Email ou senha incorretos'
       });
     }
 
-    const isMatch = await bcrypt.compare(senha, usuario.senha);
-    if (!isMatch) {
-      await cache.set(attemptsKey, attempts + 1, 300);
-      return res.status(401).json({ 
-        message: 'Credenciais inválidas',
-        code: 'CREDENCIAIS_INVALIDAS'
-      });
-    }
-
-    // Login bem-sucedido
-    await cache.del(attemptsKey);
-    await Usuario.registrarLogin(usuario.id);
-    await cache.del(cacheKey); // Invalida cache do usuário
-
-    const token = generateToken({
+    const token = await generateToken({
       id: usuario.id,
       email: usuario.email,
-      perfil: usuario.perfil,
-      lastLogin: Date.now()
+      perfil: usuario.perfil
     });
 
-    res.json({
+    return res.status(200).json({
+      success: true,
       token,
-      expiresIn: process.env.JWT_EXPIRES_IN,
+      expiresIn: '1d',
       usuario: {
         id: usuario.id,
         nome: usuario.nome,
@@ -88,42 +59,91 @@ const login = async (req, res, next) => {
 
   } catch (error) {
     console.error('Erro no login:', error);
-    res.status(500).json({ 
-      message: 'Erro interno no servidor',
-      code: 'ERRO_INTERNO'
+    return res.status(500).json({
+      success: false,
+      code: 'ERRO_INTERNO',
+      message: 'Não foi possível realizar o login',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
 
-const me = async (req, res, next) => {
+const logout = async (req, res) => {
   try {
-    const cacheKey = `user:${req.user.id}`;
-    let usuario = await cache.get(cacheKey);
+    const token = req.headers.authorization?.split(' ')[1] || req.cookies?.token;
     
-    if (!usuario) {
-      usuario = await Usuario.findById(req.user.id);
-      if (usuario) {
-        await cache.set(cacheKey, {
-          id: usuario.id,
-          nome: usuario.nome,
-          email: usuario.email,
-          perfil: usuario.perfil,
-          status: usuario.status
-        }, 1800); // Cache por 30 minutos
-      }
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        code: 'TOKEN_INVALIDO',
+        message: 'Token não fornecido'
+      });
     }
-    
-    if (!usuario) {
-      return res.status(404).json({ message: 'Usuário não encontrado' });
+
+    const decoded = await verifyToken(token);
+    if (!decoded) {
+      return res.status(401).json({
+        success: false,
+        code: 'TOKEN_INVALIDO',
+        message: 'Token inválido ou expirado'
+      });
     }
-    
-    res.json(usuario);
+
+    await cache.invalidateToken(decoded.id);
+
+    return res.status(200).json({
+      success: true,
+      code: 'LOGOUT_SUCESSO',
+      message: 'Logout realizado com sucesso'
+    });
+
   } catch (error) {
-    next(error);
+    console.error('Erro no logout:', error);
+    return res.status(500).json({
+      success: false,
+      code: 'ERRO_LOGOUT',
+      message: 'Ocorreu um erro durante o logout',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+const me = async (req, res) => {
+  try {
+    const usuario = await Usuario.findById(req.user.id);
+    
+    if (!usuario) {
+      return res.status(404).json({
+        success: false,
+        code: 'USUARIO_NAO_ENCONTRADO',
+        message: 'Usuário não encontrado'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      usuario: {
+        id: usuario.id,
+        nome: usuario.nome,
+        email: usuario.email,
+        perfil: usuario.perfil,
+        status: usuario.status
+      }
+    });
+
+  } catch (error) {
+    console.error('Erro ao buscar usuário:', error);
+    return res.status(500).json({
+      success: false,
+      code: 'ERRO_INTERNO',
+      message: 'Ocorreu um erro ao buscar dados do usuário',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 
 module.exports = {
   login,
+  logout,
   me
 };

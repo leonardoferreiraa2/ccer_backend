@@ -1,43 +1,38 @@
 const errorHandler = (err, req, res, next) => {
-  console.error(err.stack);
+  console.error('Error:', err.stack);
+  
+  const errorMap = {
+    ValidationError: { status: 400, message: 'Dados inválidos' },
+    UnauthorizedError: { status: 401, message: 'Não autorizado' },
+    JsonWebTokenError: { status: 401, message: 'Token inválido' },
+    TokenExpiredError: { status: 401, message: 'Token expirado' },
+    LIMIT_FILE_SIZE: { status: 413, message: 'Arquivo muito grande. Tamanho máximo: 5MB' },
+    default: { status: 500, message: 'Erro interno do servidor' }
+  };
 
-  if (err.name === 'ValidationError') {
-    return res.status(400).json({ message: err.message });
+  const errorType = err.name || err.code;
+  const { status, message } = errorMap[errorType] || errorMap.default;
+
+  const response = {
+    success: false,
+    message,
+    code: errorType || 'SERVER_ERROR'
+  };
+
+  if (process.env.NODE_ENV === 'development') {
+    response.error = err.message;
+    response.stack = err.stack;
   }
 
-  if (err.name === 'UnauthorizedError') {
-    return res.status(401).json({ message: 'Não autorizado' });
+  if (err.details) {
+    response.details = err.details;
   }
 
-  res.status(500).json({ message: 'Erro interno do servidor' });
+  if (err.fields) {
+    response.fields = err.fields;
+  }
+
+  res.status(status).json(response);
 };
 
 module.exports = errorHandler;
-
-C:\Temp\ccer\backend\middlewares\upload.js
-const multer = require('multer');
-const path = require('path');
-
-const storage = multer.diskStorage({
-destination: (req, file, cb) => {
-  cb(null, 'uploads/');
-},
-filename: (req, file, cb) => {
-  cb(null, `${Date.now()}-${file.originalname}`);
-}
-});
-
-const fileFilter = (req, file, cb) => {
-const allowedTypes = ['image/jpeg', 'image/png', 'image/gif'];
-if (allowedTypes.includes(file.mimetype)) {
-  cb(null, true);
-} else {
-  cb(new Error('Apenas imagens (JPEG/PNG/GIF) são permitidas'));
-}
-};
-
-module.exports = multer({
-storage,
-fileFilter,
-limits: { fileSize: 5 * 1024 * 1024 } // 5MB
-});
