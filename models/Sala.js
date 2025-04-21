@@ -4,9 +4,9 @@ const { v4: uuidv4 } = require('uuid');
 const Sala = {
   async findByTitle(titulo, id = null) {
     if (id) {
-      return db('salas').whereNot({ id }).where({ titulo }).first();
+      return db('salas').whereNot({ id }).whereRaw('LOWER(titulo) = ?', titulo.toLowerCase()).first();
     }
-    return db('salas').where({ titulo }).first();
+    return db('salas').whereRaw('LOWER(titulo) = ?', titulo.toLowerCase()).first();
   },
 
   async create(salaData) {

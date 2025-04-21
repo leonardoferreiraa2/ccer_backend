@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const Usuario = require('../models/Usuario');
-const { generateToken, verifyToken } = require('../utils/auth');
+const { generateToken, generateRefreshToken } = require('../utils/auth');
 const cache = require('../config/cache');
 
 const login = async (req, res) => {
@@ -44,10 +44,19 @@ const login = async (req, res) => {
       perfil: usuario.perfil
     });
 
+    const refreshToken = await generateRefreshToken(usuario.id);
+
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.COOKIE_SECURE === 'true',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 dias
+      sameSite: 'strict'
+    });
+
     return res.status(200).json({
       success: true,
       token,
-      expiresIn: '1d',
+      expiresIn: process.env.JWT_EXPIRES_IN,
       usuario: {
         id: usuario.id,
         nome: usuario.nome,
@@ -62,38 +71,86 @@ const login = async (req, res) => {
     return res.status(500).json({
       success: false,
       code: 'ERRO_INTERNO',
-      message: 'Não foi possível realizar o login',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Não foi possível realizar o login'
+    });
+  }
+};
+
+const refresh = async (req, res) => {
+  const refreshToken = req.cookies?.refreshToken;
+
+  if (!refreshToken) {
+    return res.status(401).json({
+      success: false,
+      code: 'TOKEN_INVALIDO',
+      message: 'Refresh token não fornecido'
+    });
+  }
+
+  try {
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+    const usuario = await Usuario.findById(decoded.id);
+
+    if (!usuario) {
+      return res.status(401).json({
+        success: false,
+        code: 'USUARIO_NAO_ENCONTRADO',
+        message: 'Usuário não encontrado'
+      });
+    }
+
+    const newToken = await generateToken({
+      id: usuario.id,
+      email: usuario.email,
+      perfil: usuario.perfil
+    });
+
+    return res.status(200).json({
+      success: true,
+      token: newToken,
+      expiresIn: process.env.JWT_EXPIRES_IN
+    });
+
+  } catch (error) {
+    console.error('Erro ao renovar token:', error);
+    return res.status(401).json({
+      success: false,
+      code: 'TOKEN_INVALIDO',
+      message: 'Refresh token inválido ou expirado'
     });
   }
 };
 
 const logout = async (req, res) => {
   try {
-    const token = req.headers.authorization?.split(' ')[1] || req.cookies?.token;
-    
-    if (!token) {
+    const token = req.headers.authorization?.split(' ')[1];
+    const refreshToken = req.cookies?.refreshToken;
+
+    if (!token && !refreshToken) {
       return res.status(400).json({
         success: false,
         code: 'TOKEN_INVALIDO',
-        message: 'Token não fornecido'
+        message: 'Nenhum token fornecido'
       });
     }
 
-    const decoded = await verifyToken(token);
-    if (!decoded) {
-      return res.status(401).json({
-        success: false,
-        code: 'TOKEN_INVALIDO',
-        message: 'Token inválido ou expirado'
-      });
+    if (token) {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      await cache.invalidateToken(decoded.id);
     }
 
-    await cache.invalidateToken(decoded.id);
+    if (refreshToken) {
+      const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+      await cache.invalidateToken(decoded.id);
+    }
+
+    res.clearCookie('refreshToken', {
+      httpOnly: true,
+      secure: process.env.COOKIE_SECURE === 'true'
+    });
 
     return res.status(200).json({
       success: true,
-      code: 'LOGOUT_SUCESSO',
       message: 'Logout realizado com sucesso'
     });
 
@@ -102,42 +159,7 @@ const logout = async (req, res) => {
     return res.status(500).json({
       success: false,
       code: 'ERRO_LOGOUT',
-      message: 'Ocorreu um erro durante o logout',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-};
-
-const me = async (req, res) => {
-  try {
-    const usuario = await Usuario.findById(req.user.id);
-    
-    if (!usuario) {
-      return res.status(404).json({
-        success: false,
-        code: 'USUARIO_NAO_ENCONTRADO',
-        message: 'Usuário não encontrado'
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      usuario: {
-        id: usuario.id,
-        nome: usuario.nome,
-        email: usuario.email,
-        perfil: usuario.perfil,
-        status: usuario.status
-      }
-    });
-
-  } catch (error) {
-    console.error('Erro ao buscar usuário:', error);
-    return res.status(500).json({
-      success: false,
-      code: 'ERRO_INTERNO',
-      message: 'Ocorreu um erro ao buscar dados do usuário',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Ocorreu um erro durante o logout'
     });
   }
 };
@@ -145,5 +167,5 @@ const me = async (req, res) => {
 module.exports = {
   login,
   logout,
-  me
+  refresh
 };
