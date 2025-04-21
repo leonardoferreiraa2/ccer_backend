@@ -1,0 +1,41 @@
+# Ambiente virtual Python
+/.venv/
+/venv/
+/env/
+
+# Bytecode Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+
+node_modules
+package-lock.json
+# Ambiente
+.env
+.env.local
+.env.dev
+.env.prod
+
+# Logs
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Banco de dados
+*.db
+*.sqlite
+/db.sqlite3
+
+# Arquivos gerados
+*.pid
+*.dump
+
+# Sistema
+.DS_Store
+Thumbs.db
