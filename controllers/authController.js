@@ -31,6 +31,15 @@ const login = async (req, res) => {
       });
     }
 
+    if (usuario.status == 'Inativo') {
+      return res.status(401).json({
+        success: false,
+        code: 'CREDENCIAIS_INVALIDAS',
+        message: 'Credenciais inválidas, contate o administrador',
+        shouldRedirect: false
+      });
+    }
+
     const senhaValida = await bcrypt.compare(senha, usuario.senha);
     if (!senhaValida) {
       return res.status(401).json({

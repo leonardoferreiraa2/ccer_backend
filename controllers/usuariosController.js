@@ -1,5 +1,6 @@
 const Usuario = require('../models/Usuario');
 const { hashPassword } = require('../utils/auth');
+const { sendNewPasswordEmail } = require('../services/emailService');
 
 const listUsuarios = async (req, res, next) => {
     try {
@@ -60,30 +61,33 @@ const getUsuario = async (req, res, next) => {
     }
 };
 
+const generateRandomPassword = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()';
+    let password = '';
+    for (let i = 0; i < 8; i++) {
+        password += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return password;
+};
+
 const createUsuario = async (req, res, next) => {
     try {
-        const { nome, email, perfil = 'Usuario', senha } = req.body;
+        const { nome, email, perfil = 'Editor' } = req.body;
 
-        if (!nome || !email || !senha) {
+        if (!nome || !email) {
             return res.status(400).json({
                 success: false,
                 code: 'MISSING_FIELDS',
-                message: 'Nome, email e senha são obrigatórios',
+                message: 'Nome e email são obrigatórios',
                 fields: {
                     nome: !nome ? 'Campo obrigatório' : null,
-                    email: !email ? 'Campo obrigatório' : null,
-                    senha: !senha ? 'Campo obrigatório' : null
+                    email: !email ? 'Campo obrigatório' : null
                 }
             });
         }
 
-        if (senha.length < 6) {
-            return res.status(400).json({
-                success: false,
-                code: 'INVALID_PASSWORD',
-                message: 'A senha deve ter pelo menos 6 caracteres'
-            });
-        }
+        // Gera senha automática para novo usuário
+        const senha = generateRandomPassword();
 
         const existeUsuario = await Usuario.findByEmail(email);
         if (existeUsuario) {
@@ -94,7 +98,16 @@ const createUsuario = async (req, res, next) => {
             });
         }
 
-        const usuario = await Usuario.create({ nome, email, perfil, senha });
+        const usuario = await Usuario.create({ 
+            nome, 
+            email, 
+            perfil, 
+            senha 
+        });
+
+        // Envia e-mail com a senha gerada
+        console.log('Email: ' + email + '\nSenha: ' + senha) // comente isso quando email funcionar
+        //await sendNewPasswordEmail(email, nome, senha);
         
         res.status(201).json({
             success: true,
@@ -120,8 +133,11 @@ const createUsuario = async (req, res, next) => {
 const updateUsuario = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { nome, email, perfil, senha, status } = req.body;
+        const { nome, email, perfil, status, senha: senhaRequest } = req.body;
 
+        console.log('ID do usuário:', id);
+        console.log('Senha recebida:', senhaRequest);
+        
         const existingUsuario = await Usuario.findById(id);
         if (!existingUsuario) {
             return res.status(404).json({
@@ -131,6 +147,7 @@ const updateUsuario = async (req, res, next) => {
             });
         }
 
+        // Verificação de permissões (mantido igual)
         if (req.user.perfil !== 'Administrador' && req.user.id !== id) {
             return res.status(403).json({
                 success: false,
@@ -139,6 +156,7 @@ const updateUsuario = async (req, res, next) => {
             });
         }
 
+        // Verificação de email (mantido igual)
         if (email && email !== existingUsuario.email) {
             const usuarioComMesmoEmail = await Usuario.findByEmail(email, id);
             if (usuarioComMesmoEmail) {
@@ -150,6 +168,7 @@ const updateUsuario = async (req, res, next) => {
             }
         }
 
+        // Verificação de perfil (mantido igual)
         if (perfil && req.user.perfil !== 'Administrador') {
             return res.status(403).json({
                 success: false,
@@ -165,15 +184,26 @@ const updateUsuario = async (req, res, next) => {
             ...(status !== undefined && { status })
         };
 
-        if (senha) {
-            if (senha.length < 6) {
-                return res.status(400).json({
-                    success: false,
-                    code: 'INVALID_PASSWORD',
-                    message: 'A senha deve ter pelo menos 6 caracteres'
-                });
-            }
-            updates.senha = await hashPassword(senha);
+        // Lógica CORRIGIDA para senha na edição
+        if (senhaRequest !== undefined && senhaRequest !== '') {
+            // Se foi enviada uma senha (não vazia), usa a senha enviada
+            updates.senha = senhaRequest;
+            
+            console.log('Usando senha definida pelo usuário');
+        } else if (senhaRequest === '') {
+            // Se foi enviada string vazia, gera senha aleatória (reset de senha)
+            updates.senha = generateRandomPassword();
+            
+            console.log('Gerando senha aleatória para reset');
+            console.log('Email: ' + existingUsuario.email + '\nSenha: ' + updates.senha);
+            
+            /*
+            await sendNewPasswordEmail(
+                email || existingUsuario.email, 
+                nome || existingUsuario.nome, 
+                updates.senha
+            );
+            */
         }
 
         const usuario = await Usuario.update(id, updates);

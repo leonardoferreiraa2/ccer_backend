@@ -1,3 +1,5 @@
+database.sqlite3
+.gitignore
 # Ambiente virtual Python
 /.venv/
 /venv/
@@ -9,7 +11,6 @@ __pycache__/
 *.so
 *.egg-info/
 
-dev.sqlite3
 node_modules
 package-lock.json
 # Ambiente
