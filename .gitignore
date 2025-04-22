@@ -1,5 +1,9 @@
-database.sqlite3
-.gitignore
+# Banco de dados
+*.db
+*.sqlite3
+*.sqlite
+/db.sqlite3
+
 # Ambiente virtual Python
 /.venv/
 /venv/
@@ -11,6 +15,7 @@ __pycache__/
 *.so
 *.egg-info/
 
+database.sqlite3
 node_modules
 package-lock.json
 # Ambiente
